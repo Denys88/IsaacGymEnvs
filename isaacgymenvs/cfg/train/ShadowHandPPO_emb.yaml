@@ -8,21 +8,28 @@ params:
     name: continuous_a2c_logstd
 
   network:
-    name: transformer
+    name: enc_mlp
     space:
       continuous:
+        mu_activation: None
+        sigma_activation: None
 
-    transformer:
+        mu_init:
+          name: default
+        sigma_init:
+          name: const_initializer
+          val: 0
+        fixed_sigma: True
+    mlp:
+      embedding_reduction: 'sum'
+      embedding_size: 256
       input_split: [24, 24, 24, 7, 3, 3, 7, 4, 65, 30, 20]
-      seq_pool: True
-      embedding_dim: 256
-      num_layers: 4
-      num_heads: 2
-      mlp_ratio: 1.0
-      dropout: 0.0
-      attention_dropout: 0.0
-      stochastic_depth: 0.0
-      positional_embedding: 'none'
+      units: [512, 512, 256, 128]
+      activation: elu
+      d2rl: False
+        
+      initializer:
+        name: glorot_uniform_initializer
 
   load_checkpoint: ${if:${...checkpoint},True,False} # flag which sets whether to load the checkpoint
   load_path: ${...checkpoint} # path to the checkpoint to load
@@ -44,7 +51,7 @@ params:
     gamma: 0.99
     tau: 0.95
     learning_rate: 5e-4
-    lr_schedule: None #adaptive
+    lr_schedule: adaptive
     schedule_type: standard
     kl_threshold: 0.016
     score_to_win: 100000
@@ -57,13 +64,13 @@ params:
     truncate_grads: True
     e_clip: 0.2
     horizon_length: 8
-    minibatch_size: 8192
+    minibatch_size: 32768
     mini_epochs: 5
     critic_coef: 4
     clip_value: True
     seq_len: 4
     bounds_loss_coef: 0.0001
-    weight_decay: 0.001
+
     player:
       #render: True
       deterministic: True

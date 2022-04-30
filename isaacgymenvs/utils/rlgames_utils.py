@@ -159,7 +159,7 @@ class RLGPUEnv(vecenv.IVecEnv):
         self.env = env_configurations.configurations[config_name]['env_creator'](**kwargs)
 
     def step(self, action):
-        return  self.env.step(action)
+        return self.env.step(action)
 
     def reset(self):
         return self.env.reset()
@@ -177,10 +177,14 @@ class RLGPUEnv(vecenv.IVecEnv):
         if hasattr(self.env, "amp_observation_space"):
             info['amp_observation_space'] = self.env.amp_observation_space
 
+        if hasattr(self.env, "get_number_of_agents"):
+            info['agents'] = self.env.get_number_of_agents()
+        if hasattr(self.env, "use_central_value"): 
+            info['use_global_observations'] = self.env.use_central_value
+
         if self.env.num_states > 0:
             info['state_space'] = self.env.state_space
             print(info['action_space'], info['observation_space'], info['state_space'])
         else:
             print(info['action_space'], info['observation_space'])
-
         return info

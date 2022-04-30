@@ -39,7 +39,9 @@ from tasks.humanoid_amp import HumanoidAMP
 from tasks.ingenuity import Ingenuity
 from tasks.quadcopter import Quadcopter
 from tasks.shadow_hand import ShadowHand
+from tasks.ma_ant import MA_Ant
 from tasks.trifinger import Trifinger
+
 
 # Mappings from strings to environments
 isaacgym_task_map = {
@@ -56,4 +58,5 @@ isaacgym_task_map = {
     "Quadcopter": Quadcopter,
     "ShadowHand": ShadowHand,
     "Trifinger": Trifinger,
+    "MA_Ant": MA_Ant
 }

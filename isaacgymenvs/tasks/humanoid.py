@@ -404,10 +404,10 @@ def compute_humanoid_observations(obs_buf, root_states, targets, potentials, inv
     angle_to_target = normalize_angle(angle_to_target).unsqueeze(-1)
     dof_pos_scaled = unscale(dof_pos, dof_limits_lower, dof_limits_upper)
 
-    # obs_buf shapes: 1, 3, 3, 1, 1, 1, 1, 1, num_dofs (21), num_dofs (21), 6, num_acts (21)
+    # obs_buf shapes: 1, 3, 3, 1, 1, 1, 1, 1, num_dofs (21), num_dofs (21), num_dofs (21), 12, num_acts (21)
     obs = torch.cat((torso_position[:, 2].view(-1, 1), vel_loc, angvel_loc * angular_velocity_scale,
                      yaw, roll, angle_to_target, up_proj.unsqueeze(-1), heading_proj.unsqueeze(-1),
                      dof_pos_scaled, dof_vel * dof_vel_scale, dof_force * contact_force_scale,
                      sensor_force_torques.view(-1, 12) * contact_force_scale, actions), dim=-1)
-
+    
     return obs, potentials, prev_potentials_new, up_vec, heading_vec

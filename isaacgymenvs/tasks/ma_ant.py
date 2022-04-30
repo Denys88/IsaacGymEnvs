@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2022, NVIDIA Corporation
+# Copyright (c) 2018-2021, NVIDIA Corporation
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -26,6 +26,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from typing import Tuple
 import numpy as np
 import os
 import torch
@@ -33,12 +34,14 @@ import torch
 from isaacgym import gymtorch
 from isaacgym import gymapi
 from isaacgym.gymtorch import *
+#from torch.tensor import Tensor
 
 from isaacgymenvs.utils.torch_jit_utils import *
 from .base.vec_task import VecTask
+from .base.ma_vec_task import MA_VecTask
 
 
-class Ant(VecTask):
+class MA_Ant(MA_VecTask):
 
     def __init__(self, cfg, sim_device, graphics_device_id, headless):
 
@@ -64,10 +67,17 @@ class Ant(VecTask):
         self.plane_dynamic_friction = self.cfg["env"]["plane"]["dynamicFriction"]
         self.plane_restitution = self.cfg["env"]["plane"]["restitution"]
 
-        self.cfg["env"]["numObservations"] = 60
-        self.cfg["env"]["numActions"] = 8
-
+        # see func: compute_ant_observations() for details
+        # self.cfg["env"]["numObservations"] = 48 # dof pos(2) + dof vel(2) + dof action(2) + feet force sensor(force&torque, 6)
+        self.cfg["env"]["numObservations"] = 60   # dof pos(2) + dof vel(2) + dof action(2) + feet force sensor(force&torque, 6)
+        self.cfg["env"]["numStates"] = 60         # 12(torso state) + 4 x 12 (4 leg states)
+        self.cfg["env"]["numActions"] = 2         # 2 dofs on each leg
+        self.cfg["env"]["numAgents"] = 4          # 4 legs
+        self.use_central_value = False
+        
         super().__init__(config=self.cfg, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless)
+        self.obs_idxs = torch.eye(4, dtype=torch.float32, device=self.device)
+        self.repeats = self.num_agents * torch.ones(self.num_envs, dtype=torch.long, device=self.device)
 
         if self.viewer != None:
             cam_pos = gymapi.Vec3(50.0, 25.0, 2.4)
@@ -114,7 +124,7 @@ class Ant(VecTask):
         self.prev_potentials = self.potentials.clone()
 
     def create_sim(self):
-        self.up_axis_idx = 2 # index of up axis: Y=1, Z=2
+        self.up_axis_idx = self.set_sim_params_up_axis(self.sim_params, 'z')
         self.sim = super().create_sim(self.device_id, self.graphics_device_id, self.physics_engine, self.sim_params)
 
         self._create_ground_plane()
@@ -153,7 +163,7 @@ class Ant(VecTask):
 
         ant_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
         self.num_dof = self.gym.get_asset_dof_count(ant_asset)
-        self.num_bodies = self.gym.get_asset_rigid_body_count(ant_asset)
+        self.num_bodies = self.gym.get_asset_rigid_body_count(ant_asset) # 9 = 4 x 2(front&back-end legs) + 1(torso)
 
         # Note - for this asset we are loading the actuator info from the MJCF
         actuator_props = self.gym.get_asset_actuator_properties(ant_asset)
@@ -214,6 +224,7 @@ class Ant(VecTask):
     def compute_reward(self, actions):
         self.rew_buf[:], self.reset_buf[:] = compute_ant_reward(
             self.obs_buf,
+            self.states_buf,
             self.reset_buf,
             self.progress_buf,
             self.actions,
@@ -226,7 +237,8 @@ class Ant(VecTask):
             self.joints_at_limit_cost_scale,
             self.termination_height,
             self.death_cost,
-            self.max_episode_length
+            self.max_episode_length,
+            self.repeats
         )
 
     def compute_observations(self):
@@ -236,12 +248,14 @@ class Ant(VecTask):
         #print("Feet forces and torques: ", self.vec_sensor_tensor[0, :])
         # print(self.vec_sensor_tensor.shape)
 
-        self.obs_buf[:], self.potentials[:], self.prev_potentials[:], self.up_vec[:], self.heading_vec[:] = compute_ant_observations(
-            self.obs_buf, self.root_states, self.targets, self.potentials,
-            self.inv_start_rot, self.dof_pos, self.dof_vel,
-            self.dof_limits_lower, self.dof_limits_upper, self.dof_vel_scale,
-            self.vec_sensor_tensor, self.actions, self.dt, self.contact_force_scale,
-            self.basis_vec0, self.basis_vec1, self.up_axis_idx)
+        self.obs_buf[:], self.states_buf[:], self.potentials[:], self.prev_potentials[:], self.up_vec[:], self.heading_vec[:] = \
+            compute_ant_observations(
+                self.obs_buf, self.obs_idxs, self.root_states, self.targets, self.potentials,
+                self.inv_start_rot, self.dof_pos, self.dof_vel,
+                self.dof_limits_lower, self.dof_limits_upper, self.dof_vel_scale,
+                self.vec_sensor_tensor, self.actions, self.dt, self.contact_force_scale,
+                self.basis_vec0, self.basis_vec1, self.up_axis_idx, self.repeats
+            )
 
     def reset_idx(self, env_ids):
         # Randomization can happen only at reset time, since it can reset actor positions on GPU
@@ -268,12 +282,21 @@ class Ant(VecTask):
         to_target[:, 2] = 0.0
         self.prev_potentials[env_ids] = -torch.norm(to_target, p=2, dim=-1) / self.dt
         self.potentials[env_ids] = self.prev_potentials[env_ids].clone()
-
-        self.progress_buf[env_ids] = 0
-        self.reset_buf[env_ids] = 0
+        agent_env_ids = expand_env_ids(env_ids, self.num_agents)
+        self.progress_buf[agent_env_ids] = 0
+        self.reset_buf[agent_env_ids] = 0
 
     def pre_physics_step(self, actions):
+        # actions.shape = [num_envs * num_agents, num_actions], stacked as followed:
+        # {[(agent1_act_1, agent1_act2)|(agent2_act1, agent2_act2)|...]_(env0),
+        #  [(agent1_act_1, agent1_act2)|(agent2_act1, agent2_act2)|...]_(env1),
+        #  ... }
+
         self.actions = actions.clone().to(self.device)
+
+        # reshape [num_envs * num_agents, num_actions] to [num_envs, num_agents * num_actions]
+        self.actions = self.actions.reshape(self.num_envs, self.num_agents * self.num_actions)
+
         forces = self.actions * self.joint_gears * self.power_scale
         force_tensor = gymtorch.unwrap_tensor(forces)
         self.gym.set_dof_actuation_force_tensor(self.sim, force_tensor)
@@ -282,7 +305,8 @@ class Ant(VecTask):
         self.progress_buf += 1
         self.randomize_buf += 1
 
-        env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
+        resets = self.reset_buf.reshape(self.num_envs, self.num_agents).sum(dim=1)
+        env_ids = (resets == self.num_agents).nonzero(as_tuple=False).flatten()
         if len(env_ids) > 0:
             self.reset_idx(env_ids)
 
@@ -310,14 +334,30 @@ class Ant(VecTask):
 
             self.gym.add_lines(self.viewer, None, self.num_envs * 2, points, colors)
 
+    def get_number_of_agents(self):
+        return self.num_agents
+
 #####################################################################
 ###=========================jit functions=========================###
 #####################################################################
 
 
 @torch.jit.script
+def expand_env_ids(env_ids, n_agents):
+    # type: (Tensor, int) -> Tensor
+    device = env_ids.device
+    agent_env_ids = torch.zeros((n_agents * len(env_ids)), device=device, dtype=torch.long)
+    agent_env_ids[0::4] = env_ids * n_agents + 0
+    agent_env_ids[1::4] = env_ids * n_agents + 1
+    agent_env_ids[2::4] = env_ids * n_agents + 2
+    agent_env_ids[3::4] = env_ids * n_agents + 3
+    return agent_env_ids
+
+
+@torch.jit.script
 def compute_ant_reward(
     obs_buf,
+    state_buf,
     reset_buf,
     progress_buf,
     actions,
@@ -330,22 +370,23 @@ def compute_ant_reward(
     joints_at_limit_cost_scale,
     termination_height,
     death_cost,
-    max_episode_length
+    max_episode_length,
+    repeats
 ):
-    # type: (Tensor, Tensor, Tensor, Tensor, float, float, Tensor, Tensor, float, float, float, float, float, float) -> Tuple[Tensor, Tensor]
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, float, float, Tensor, Tensor, float, float, float, float, float, float, Tensor) -> Tuple[Tensor, Tensor]
 
     # reward from direction headed
-    heading_weight_tensor = torch.ones_like(obs_buf[:, 11]) * heading_weight
-    heading_reward = torch.where(obs_buf[:, 11] > 0.8, heading_weight_tensor, heading_weight * obs_buf[:, 11] / 0.8)
+    heading_weight_tensor = torch.ones_like(state_buf[:, 11]) * heading_weight
+    heading_reward = torch.where(state_buf[:, 11] > 0.8, heading_weight_tensor, heading_weight * state_buf[:, 11] / 0.8)
 
     # aligning up axis of ant and environment
     up_reward = torch.zeros_like(heading_reward)
-    up_reward = torch.where(obs_buf[:, 10] > 0.93, up_reward + up_weight, up_reward)
+    up_reward = torch.where(state_buf[:, 10] > 0.93, up_reward + up_weight, up_reward)
 
     # energy penalty for movement
     actions_cost = torch.sum(actions ** 2, dim=-1)
-    electricity_cost = torch.sum(torch.abs(actions * obs_buf[:, 20:28]), dim=-1)
-    dof_at_limit_cost = torch.sum(obs_buf[:, 12:20] > 0.99, dim=-1)
+    electricity_cost = torch.sum(torch.abs(actions * state_buf[:, 20:28]), dim=-1)
+    dof_at_limit_cost = torch.sum(state_buf[:, 12:20] > 0.99, dim=-1)
 
     # reward for duration of staying alive
     alive_reward = torch.ones_like(potentials) * 0.5
@@ -354,23 +395,25 @@ def compute_ant_reward(
     total_reward = progress_reward + alive_reward + up_reward + heading_reward - \
         actions_cost_scale * actions_cost - energy_cost_scale * electricity_cost - dof_at_limit_cost * joints_at_limit_cost_scale
 
+    is_dead = state_buf[:, 0] < termination_height
     # adjust reward for fallen agents
-    total_reward = torch.where(obs_buf[:, 0] < termination_height, torch.ones_like(total_reward) * death_cost, total_reward)
-
+    total_reward = torch.where(is_dead, torch.ones_like(total_reward) * death_cost, total_reward)
+   
     # reset agents
-    reset = torch.where(obs_buf[:, 0] < termination_height, torch.ones_like(reset_buf), reset_buf)
+    is_dead = is_dead.repeat_interleave(repeats, dim=0)
+    reset = torch.where(is_dead, torch.ones_like(reset_buf), reset_buf)
     reset = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), reset)
     
-    return total_reward, reset
+    return total_reward.repeat_interleave(repeats, dim=0), reset
 
 
 @torch.jit.script
-def compute_ant_observations(obs_buf, root_states, targets, potentials,
+def compute_ant_observations(obs_buf, obs_idxs, root_states, targets, potentials,
                              inv_start_rot, dof_pos, dof_vel,
                              dof_limits_lower, dof_limits_upper, dof_vel_scale,
                              sensor_force_torques, actions, dt, contact_force_scale,
-                             basis_vec0, basis_vec1, up_axis_idx):
-    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, float, Tensor, Tensor, float, float, Tensor, Tensor, int) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]
+                             basis_vec0, basis_vec1, up_axis_idx, repeats):
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, float, Tensor, Tensor, float, float, Tensor, Tensor, int, Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]
 
     torso_position = root_states[:, 0:3]
     torso_rotation = root_states[:, 3:7]
@@ -391,11 +434,27 @@ def compute_ant_observations(obs_buf, root_states, targets, potentials,
 
     dof_pos_scaled = unscale(dof_pos, dof_limits_lower, dof_limits_upper)
 
-    # obs_buf shapes: 1, 3, 3, 1, 1, 1, 1, 1, num_dofs(8), num_dofs(8), 24, num_dofs(8)
-    obs = torch.cat((torso_position[:, up_axis_idx].view(-1, 1), vel_loc, angvel_loc,
-                     yaw.unsqueeze(-1), roll.unsqueeze(-1), angle_to_target.unsqueeze(-1),
-                     up_proj.unsqueeze(-1), heading_proj.unsqueeze(-1), dof_pos_scaled,
-                     dof_vel * dof_vel_scale, sensor_force_torques.view(-1, 24) * contact_force_scale,
-                     actions), dim=-1)
+    dof_vel = dof_vel * dof_vel_scale
+    contact_force = sensor_force_torques.view(-1, 24) * contact_force_scale
 
-    return obs, potentials, prev_potentials_new, up_vec, heading_vec
+    state = torch.cat((                                                 # ---- TORSO STATE ----     |
+            torso_position[:, up_axis_idx].view(-1, 1),                 # pos_up_axis(1)            |
+            vel_loc, angvel_loc,                                        # lin_vel(3), ang_vel(3)    |
+            yaw.unsqueeze(-1), roll.unsqueeze(-1),                      # yaw(1), row(1)            ===> 12
+            angle_to_target.unsqueeze(-1),                              # ang_to_target(1)          |
+            up_proj.unsqueeze(-1),                                      # up_proj(1)                |
+            heading_proj.unsqueeze(-1),                                 # heading_proj(1)           |
+                                                                        # ----- LEG STATE -----                 |
+            dof_pos_scaled,                                             # 2 joint dof pos on each of 4 legs(8)  | 
+            dof_vel,                                                    # 2 joint dof vel on each of 4 legs(8)  ===> 48 = 12 x 4(agents)    
+            contact_force,                                              # 6 force sensor on each of 4 legs(24)  |
+            actions.flatten(1)                                          # 2 joint actions on each of 4 legs(24) |
+        ), dim=-1)
+
+    """ wrap state tensors into agent-wise observations """
+    
+    obs_idxs = obs_idxs.repeat(state.size()[0], 1)
+    obs = state.repeat_interleave(repeats, dim=0)
+    obs = torch.cat([obs, obs_idxs], dim=-1)
+
+    return obs, state, potentials, prev_potentials_new, up_vec, heading_vec

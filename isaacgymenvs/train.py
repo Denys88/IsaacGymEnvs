@@ -43,14 +43,14 @@ from utils.utils import set_np_formatting, set_seed
 
 from rl_games.common import env_configurations, vecenv
 from rl_games.torch_runner import Runner
-
+from rl_games.algos_torch import model_builder
 import yaml
 
 from isaacgymenvs.learning import amp_continuous
 from isaacgymenvs.learning import amp_players
 from isaacgymenvs.learning import amp_models
 from isaacgymenvs.learning import amp_network_builder
-
+from isaacgymenvs.learning.networks.ig_networks import EncoderMLPBuilder, TransformerBuilder
 
 ## OmegaConf & Hydra Config
 
@@ -62,6 +62,10 @@ OmegaConf.register_new_resolver('if', lambda pred, a, b: a if pred else b)
 # num_ensv
 OmegaConf.register_new_resolver('resolve_default', lambda default, arg: default if arg=='' else arg)
 
+model_builder.register_model('continuous_amp', lambda network, **kwargs : amp_models.ModelAMPContinuous(network))
+model_builder.register_network('amp', lambda **kwargs : amp_network_builder.AMPBuilder())
+model_builder.register_network('enc_mlp', lambda **kwargs : EncoderMLPBuilder())
+model_builder.register_network('transformer', lambda **kwargs : TransformerBuilder())
 @hydra.main(config_name="config", config_path="./cfg")
 def launch_rlg_hydra(cfg: DictConfig):
 
@@ -103,8 +107,6 @@ def launch_rlg_hydra(cfg: DictConfig):
         runner = Runner(algo_observer)
         runner.algo_factory.register_builder('amp_continuous', lambda **kwargs : amp_continuous.AMPAgent(**kwargs))
         runner.player_factory.register_builder('amp_continuous', lambda **kwargs : amp_players.AMPPlayerContinuous(**kwargs))
-        runner.model_builder.model_factory.register_builder('continuous_amp', lambda network, **kwargs : amp_models.ModelAMPContinuous(network))  
-        runner.model_builder.network_factory.register_builder('amp', lambda **kwargs : amp_network_builder.AMPBuilder())
 
         return runner
 
@@ -125,6 +127,8 @@ def launch_rlg_hydra(cfg: DictConfig):
     runner.run({
         'train': not cfg.test,
         'play': cfg.test,
+        'checkpoint' : cfg.checkpoint,
+        'sigma' : None
     })
 
 if __name__ == "__main__":

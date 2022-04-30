@@ -508,6 +508,7 @@ class ShadowHand(VecTask):
 
             self.obs_buf[:, 57:77] = self.actions
         else:
+
             self.obs_buf[:, 0:self.num_shadow_hand_dofs] = unscale(self.shadow_hand_dof_pos,
                                                                    self.shadow_hand_dof_lower_limits, self.shadow_hand_dof_upper_limits)
             self.obs_buf[:, self.num_shadow_hand_dofs:2*self.num_shadow_hand_dofs] = self.vel_obs_scale * self.shadow_hand_dof_vel
