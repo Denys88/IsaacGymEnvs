@@ -48,8 +48,8 @@ from tensorboardX import SummaryWriter
 
 
 class AMPAgent(common_agent.CommonAgent):
-    def __init__(self, base_name, config):
-        super().__init__(base_name, config)
+    def __init__(self, base_name, params):
+        super().__init__(base_name, params)
 
         if self._normalize_amp_input:
             self._amp_input_mean_std = RunningMeanStd(self._amp_observation_space.shape).to(self.ppo_device)

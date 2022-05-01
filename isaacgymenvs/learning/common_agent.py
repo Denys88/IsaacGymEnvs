@@ -32,6 +32,7 @@ from gym import spaces
 import numpy as np
 import os
 import time
+from pytest import param
 import yaml
 
 from rl_games.algos_torch import a2c_continuous
@@ -52,9 +53,9 @@ from tensorboardX import SummaryWriter
 
 
 class CommonAgent(a2c_continuous.A2CAgent):
-    def __init__(self, base_name, config):
-        a2c_common.A2CBase.__init__(self, base_name, config)
-
+    def __init__(self, base_name, params):
+        a2c_common.A2CBase.__init__(self, base_name, params)
+        config = params['config']
         self._load_config_params(config)
 
         self.is_discrete = False

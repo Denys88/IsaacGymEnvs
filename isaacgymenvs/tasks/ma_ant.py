@@ -69,7 +69,7 @@ class MA_Ant(MA_VecTask):
 
         # see func: compute_ant_observations() for details
         # self.cfg["env"]["numObservations"] = 48 # dof pos(2) + dof vel(2) + dof action(2) + feet force sensor(force&torque, 6)
-        self.cfg["env"]["numObservations"] = 60   # dof pos(2) + dof vel(2) + dof action(2) + feet force sensor(force&torque, 6)
+        self.cfg["env"]["numObservations"] = 64   # dof pos(2) + dof vel(2) + dof action(2) + feet force sensor(force&torque, 6)
         self.cfg["env"]["numStates"] = 60         # 12(torso state) + 4 x 12 (4 leg states)
         self.cfg["env"]["numActions"] = 2         # 2 dofs on each leg
         self.cfg["env"]["numAgents"] = 4          # 4 legs
