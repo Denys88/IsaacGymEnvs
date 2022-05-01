@@ -77,10 +77,6 @@ class CommonAgent(a2c_continuous.A2CAgent):
 
         self.optimizer = optim.Adam(self.model.parameters(), float(self.last_lr), eps=1e-08, weight_decay=self.weight_decay)
 
-        if self.normalize_input:
-            obs_shape = torch_ext.shape_whc_to_cwh(self.obs_shape)
-            self.running_mean_std = RunningMeanStd(obs_shape).to(self.ppo_device)
-
         if self.has_central_value:
             cv_config = {
                 'state_shape' : torch_ext.shape_whc_to_cwh(self.state_shape), 
@@ -446,6 +442,9 @@ class CommonAgent(a2c_continuous.A2CAgent):
             'input_shape' : obs_shape,
             'num_seqs' : self.num_actors * self.num_agents,
             'value_size': self.env_info.get('value_size', 1),
+            'normalize_value' : self.normalize_value,
+            'normalize_input': self.normalize_input,
+
         }
         return config
 
@@ -468,9 +467,10 @@ class CommonAgent(a2c_continuous.A2CAgent):
     def _eval_critic(self, obs_dict):
         self.model.eval()
         obs = obs_dict['obs']
+        if self.normalize_input:
+            obs = self.model.norm_obs(obs)
         processed_obs = self._preproc_obs(obs)
         value = self.model.a2c_network.eval_critic(processed_obs)
-
         if self.normalize_value:
             value = self.value_mean_std(value, True)
         return value
