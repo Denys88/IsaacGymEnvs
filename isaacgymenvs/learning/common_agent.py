@@ -467,9 +467,10 @@ class CommonAgent(a2c_continuous.A2CAgent):
     def _eval_critic(self, obs_dict):
         self.model.eval()
         obs = obs_dict['obs']
-        if self.normalize_input:
-            obs = self.model.norm_obs(obs)
+
         processed_obs = self._preproc_obs(obs)
+        if self.normalize_input:
+            processed_obs = self.model.norm_obs(processed_obs)
         value = self.model.a2c_network.eval_critic(processed_obs)
         if self.normalize_value:
             value = self.value_mean_std(value, True)
