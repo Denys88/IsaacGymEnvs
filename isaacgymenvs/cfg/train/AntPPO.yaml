@@ -61,13 +61,12 @@ params:
     save_frequency: 50
     grad_norm: 1.0
     entropy_coef: 0.0
-    truncate_grads: False
+    truncate_grads: True
     e_clip: 0.2
     horizon_length: 16
     minibatch_size: 32768
     mini_epochs: 4
     critic_coef: 2
     clip_value: True
-    seq_len: 4
-    use_smooth_clamp: False
+    use_smooth_clamp: True
     bounds_loss_coef: 0.0000
