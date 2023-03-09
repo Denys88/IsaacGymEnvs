@@ -51,7 +51,7 @@ class CommonPlayer(players.PpoPlayerContinuous):
         n_games = self.games_num
         render = self.render_env
         n_game_life = self.n_game_life
-        is_determenistic = self.is_determenistic
+        is_determenistic = self.is_deterministic
         sum_rewards = 0
         sum_steps = 0
         sum_game_res = 0
@@ -77,6 +77,7 @@ class CommonPlayer(players.PpoPlayerContinuous):
             batch_size = self.get_batch_size(obs_dict['obs'], batch_size)
 
             if need_init_rnn:
+                print('atata')
                 self.init_rnn()
                 need_init_rnn = False
 

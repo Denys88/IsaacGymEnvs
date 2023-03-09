@@ -1,3 +1,4 @@
+ 
 params:
   seed: ${...seed}
 
@@ -9,7 +10,7 @@ params:
 
   network:
     name: amp
-    separate: True
+    separate: False
 
     space:
       continuous:
@@ -24,7 +25,7 @@ params:
         learn_sigma: False
 
     mlp:
-      units: [1024, 512]
+      units: [1024]
       activation: relu
       d2rl: False
 
@@ -32,6 +33,11 @@ params:
         name: default
       regularizer:
         name: None
+
+    rnn:
+      name: 'lstm'
+      units: 512
+      layers: 1
 
     disc:
       units: [1024, 512]
@@ -76,7 +82,7 @@ params:
     mini_epochs: 6
     critic_coef: 5
     clip_value: False
-    seq_len: 4
+    seq_len: 16
     bounds_loss_coef: 10
     amp_obs_demo_buffer_size: 200000
     amp_replay_buffer_size: 1000000
