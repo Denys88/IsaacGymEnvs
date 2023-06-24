@@ -46,7 +46,7 @@ env:
   fallPenalty: 0.0
 
   objectType: "block" # can be block, egg or pen
-  observationType: "full_state" # can be "openai", "full_no_vel", "full", "full_state"
+  observationType: "openai" # can be "openai", "full_no_vel", "full", "full_state"
   asymmetric_observations: False
   successTolerance: 0.1
   printNumSuccesses: False

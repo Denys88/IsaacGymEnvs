@@ -148,13 +148,17 @@ class TransformerModel(nn.Module):
     dropout=0.1,
     attention_dropout=0.1,
     stochastic_depth=0.1,
+    split_features=False,
     positional_embedding='none',
     ):
         super(TransformerModel, self).__init__()
         
         self.input_split = list(input_split)
-        self.encoders = torch.nn.ModuleList([torch.nn.Linear(num, embedding_dim,bias=False) for num in self.input_split])
-        
+        self.split_features = split_features
+        if split_features:
+            self.encoders = torch.nn.ModuleList([torch.nn.Linear(num, embedding_dim,bias=False) for num in self.input_split])
+        else:
+            self.projector = torch.nn.Linear(self.input_split[0], embedding_dim, bias=False)
         self.actions_num = actions_num
         self.sigma = nn.Parameter(torch.zeros(actions_num, requires_grad=True, dtype=torch.float32), requires_grad=True)
         self.transformer_encoder = TransformerClassifier(
@@ -175,13 +179,96 @@ class TransformerModel(nn.Module):
 
 
     def forward(self, src):
-        src = torch.split(src, self.input_split, dim=1)
-        src = [e(o) for e, o in zip(self.encoders, src)]
-        src = [e.unsqueeze(1) for e in src]
-        src = torch.cat(src, dim=1)
+        if self.split_features:
+            src = torch.split(src, self.input_split, dim=1)
+            src = [e(o) for e, o in zip(self.encoders, src)]
+            src = [e.unsqueeze(1) for e in src]
+            src = torch.cat(src, dim=1)
+        else:
+            src = self.projector(src)
+            
+        
         output = self.transformer_encoder(src)
         mu, value = torch.split(output, [self.actions_num,1], dim=1)
         return mu, mu*0 + self.sigma, value, None
+
+
+class PositionalEncoding(nn.Module):
+    r"""Inject some information about the relative or absolute position of the tokens
+        in the sequence. The positional encodings have the same dimension as
+        the embeddings, so that the two can be summed. Here, we use sine and cosine
+        functions of different frequencies.
+    .. math::
+        \text{PosEncoder}(pos, 2i) = sin(pos/10000^(2i/d_model))
+        \text{PosEncoder}(pos, 2i+1) = cos(pos/10000^(2i/d_model))
+        \text{where pos is the word position and i is the embed idx)
+    Args:
+        d_model: the embed dim (required).
+        dropout: the dropout value (default=0.1).
+        max_len: the max. length of the incoming sequence (default=5000).
+    Examples:
+        >>> pos_encoder = PositionalEncoding(d_model)
+    """
+
+    def __init__(self, d_model, dropout=0.1, max_len=512):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        r"""Inputs of forward function
+        Args:
+            x: the sequence fed to the positional encoder model (required).
+        Shape:
+            x: [sequence length, batch size, embed dim]
+            output: [sequence length, batch size, embed dim]
+        Examples:
+            >>> output = pos_encoder(x)
+        """
+
+        x = x + self.pe[:x.size(0), :]
+        return self.dropout(x)
+
+class TorchTransformerModel(nn.Module):
+    """Container module with an encoder, a recurrent or transformer module, and a decoder."""
+
+    def __init__(self, nhead=4, 
+        nhid=4, 
+        nlayers=4, 
+        proj_size =512, 
+        input_size= 256, 
+        num_classes= 4, 
+        ropout=0.0):
+        super(TransformerModel, self).__init__()
+        try:
+            from torch.nn import TransformerEncoder, TransformerEncoderLayer
+        except:
+            raise ImportError('TransformerEncoder module does not exist in PyTorch 1.1 or lower.')
+        self.src_mask = None
+        self.pos_encoder = PositionalEncoding(proj_size, dropout)
+        encoder_layers = TransformerEncoderLayer(proj_size, nhead, nhid, dropout, activation='gelu')
+        self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers, nn.LayerNorm(proj_size))
+        self.decoder = nn.Linear(proj_size, num_classes)
+        self.last_ln = nn.LayerNorm(proj_size)
+        self.proj_layer = nn.Linear(input_size, proj_size)
+
+    def forward(self, src):
+        #print(src.size())
+        src = encode_image(src)
+        src = self.proj_layer(src)
+        src = self.pos_encoder(src)
+        output = self.transformer_encoder(src)
+        output = torch.mean(output, dim=0)
+        #output = self.last_ln(output)
+        output = self.decoder(output)
+        return output
 
 class TransformerBuilder(network_builder.NetworkBuilder):
     def __init__(self, **kwargs):

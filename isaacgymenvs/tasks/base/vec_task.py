@@ -45,6 +45,7 @@ import sys
 import abc
 from abc import ABC
 
+from utils import frame_stack
 
 
 class Env(ABC):
@@ -200,6 +201,14 @@ class VecTask(Env):
 
         self.obs_dict = {}
 
+                
+        self.stack_obs = self.cfg["env"].get("stackObservations", True)
+        if self.stack_obs:
+            stack_count = self.cfg["env"].get("stackObsCount", 4)
+            flatten = self.cfg["env"].get("stackObsFlatten", False)
+            self.stack = frame_stack.FrameStack(self.obs_space, stack_count, flatten)
+            self.obs_space = self.stack.observation_space
+
     def set_viewer(self):
         """Create the viewer."""
 
@@ -333,7 +342,11 @@ class VecTask(Env):
         if self.num_states > 0:
             self.obs_dict["states"] = self.get_state()
 
-        return self.obs_dict, self.rew_buf.to(self.rl_device), self.reset_buf.to(self.rl_device), self.extras
+        dones = self.reset_buf.to(self.rl_device)
+        if self.stack_obs:
+            self.obs_dict["obs"] = self.stack.get_obs(self.obs_dict["obs"] ,dones)    
+        
+        return self.obs_dict, self.rew_buf.to(self.rl_device), dones, self.extras
 
     def zero_actions(self) -> torch.Tensor:
         """Returns a buffer with zero actions.
@@ -362,7 +375,8 @@ class VecTask(Env):
         # asymmetric actor-critic
         if self.num_states > 0:
             self.obs_dict["states"] = self.get_state()
-
+        if self.stack_obs:
+            self.obs_dict["obs"] = self.stack.init_obs(self.obs_dict["obs"])   
         return self.obs_dict
 
     def reset_done(self):

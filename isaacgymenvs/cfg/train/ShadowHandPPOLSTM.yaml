@@ -37,8 +37,8 @@ params:
       units: 256
       layers: 1
       before_mlp: False
-      concat_input: True
-      layer_norm: True
+      concat_input: False
+      layer_norm: False
 
   load_checkpoint: ${if:${...checkpoint},True,False} # flag which sets whether to load the checkpoint
   load_path: ${...checkpoint} # path to the checkpoint to load
@@ -70,12 +70,13 @@ params:
     entropy_coef: 0.0
     truncate_grads: True
     e_clip: 0.2
-    horizon_length: 32
+    horizon_length: 16
     minibatch_size: 16384
     mini_epochs: ${resolve_default:4,${....max_iterations}}
+    max_epochs: ${resolve_default:5000,${....max_iterations}}
     critic_coef: 4
     clip_value: False
-    seq_len: 4
+    seq_len: 8
     bounds_loss_coef: 0.0001
 
     player:

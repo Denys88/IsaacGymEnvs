@@ -21,9 +21,10 @@ params:
           val: 0
         fixed_sigma: True
     mlp:
-      embedding_reduction: 'sum'
+      embedding_reduction: 'mean'
       embedding_size: 256
-      input_split: [24, 24, 24, 7, 3, 3, 7, 4, 65, 30, 20]
+      #input_split: [24, 24, 24, 7, 3, 3, 7, 4, 65, 30, 20]
+      input_split: [77,77,77,77,77,77,77,77]
       units: [512, 512, 256, 128]
       activation: elu
       d2rl: False
