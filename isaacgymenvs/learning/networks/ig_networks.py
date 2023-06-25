@@ -277,7 +277,7 @@ class TorchTransformerModel(nn.Module):
     def forward(self, src):
         src = src.permute(1,0,2)
         src = self.proj_layer(src)
-        if not self.positional_embedding == None:
+        if self.positional_embedding == 'sine':
             src = self.pos_encoder(src)
         
         output = self.transformer_encoder(src)
