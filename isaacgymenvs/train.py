@@ -50,7 +50,7 @@ from isaacgymenvs.learning import amp_continuous
 from isaacgymenvs.learning import amp_players
 from isaacgymenvs.learning import amp_models
 from isaacgymenvs.learning import amp_network_builder
-from isaacgymenvs.learning.networks.ig_networks import EncoderMLPBuilder, TransformerBuilder
+from isaacgymenvs.learning.networks.ig_networks import EncoderMLPBuilder, TransformerBuilder, TorchTransformerBuilder
 
 ## OmegaConf & Hydra Config
 
@@ -66,6 +66,7 @@ model_builder.register_model('continuous_amp', lambda network, **kwargs : amp_mo
 model_builder.register_network('amp', lambda **kwargs : amp_network_builder.AMPBuilder())
 model_builder.register_network('enc_mlp', lambda **kwargs : EncoderMLPBuilder())
 model_builder.register_network('transformer', lambda **kwargs : TransformerBuilder())
+model_builder.register_network('torch_transformer', lambda **kwargs : TorchTransformerBuilder())
 @hydra.main(config_name="config", config_path="./cfg")
 def launch_rlg_hydra(cfg: DictConfig):
 

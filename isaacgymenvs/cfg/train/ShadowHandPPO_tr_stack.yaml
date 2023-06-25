@@ -8,7 +8,7 @@ params:
     name: continuous_a2c_logstd
 
   network:
-    name: transformer
+    name: torch_transformer
     space:
       continuous:
 

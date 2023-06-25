@@ -3,8 +3,9 @@ from rl_games.algos_torch import network_builder
 import torch
 import torch.nn as nn
 import numpy as np
-
+import math
 from .transformers.utils.transformers import TransformerClassifier
+from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
 class EncoderMLPBuilder(network_builder.NetworkBuilder):
     def __init__(self, **kwargs):
@@ -139,6 +140,7 @@ class TransformerModel(nn.Module):
 
     def __init__(self,
     actions_num = 1,
+    input_shape = 128,
     input_split = [], 
     seq_pool=True,
     embedding_dim=768,
@@ -152,13 +154,13 @@ class TransformerModel(nn.Module):
     positional_embedding='none',
     ):
         super(TransformerModel, self).__init__()
-        
+        self.input_shape = input_shape
         self.input_split = list(input_split)
         self.split_features = split_features
         if split_features:
             self.encoders = torch.nn.ModuleList([torch.nn.Linear(num, embedding_dim,bias=False) for num in self.input_split])
         else:
-            self.projector = torch.nn.Linear(self.input_split[0], embedding_dim, bias=False)
+            self.projector = torch.nn.Linear(input_shape[1], embedding_dim, bias=False)
         self.actions_num = actions_num
         self.sigma = nn.Parameter(torch.zeros(actions_num, requires_grad=True, dtype=torch.float32), requires_grad=True)
         self.transformer_encoder = TransformerClassifier(
@@ -172,7 +174,7 @@ class TransformerModel(nn.Module):
             attention_dropout=attention_dropout,
             stochastic_depth=stochastic_depth,
             positional_embedding=positional_embedding,
-            sequence_length= len(self.input_split)
+            sequence_length = len(self.input_split) if split_features else input_shape[0]
         )
         #for m in self.encoders:
         #    nn.init.trunc_normal_(m.weight, std=.02)
@@ -232,43 +234,58 @@ class PositionalEncoding(nn.Module):
         Examples:
             >>> output = pos_encoder(x)
         """
-
         x = x + self.pe[:x.size(0), :]
         return self.dropout(x)
 
 class TorchTransformerModel(nn.Module):
     """Container module with an encoder, a recurrent or transformer module, and a decoder."""
 
-    def __init__(self, nhead=4, 
-        nhid=4, 
-        nlayers=4, 
-        proj_size =512, 
-        input_size= 256, 
-        num_classes= 4, 
-        ropout=0.0):
-        super(TransformerModel, self).__init__()
-        try:
-            from torch.nn import TransformerEncoder, TransformerEncoderLayer
-        except:
-            raise ImportError('TransformerEncoder module does not exist in PyTorch 1.1 or lower.')
+    def __init__(self, 
+        actions_num = 1,
+        input_shape = [4,42],
+        input_split = [], 
+        seq_pool=True, #unused
+        embedding_dim=768,
+        num_layers=12,
+        num_heads=12,
+        mlp_ratio=4.0,
+        dropout=0.1,
+        attention_dropout=0.1, #unused
+        stochastic_depth=0.1, #unused
+        split_features=False, #unused
+        positional_embedding='none',):
+        '''
+        half of params are unused now
+        '''
+        super(TorchTransformerModel, self).__init__()
+
+        self.actions_num = actions_num
         self.src_mask = None
-        self.pos_encoder = PositionalEncoding(proj_size, dropout)
-        encoder_layers = TransformerEncoderLayer(proj_size, nhead, nhid, dropout, activation='gelu')
-        self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers, nn.LayerNorm(proj_size))
-        self.decoder = nn.Linear(proj_size, num_classes)
-        self.last_ln = nn.LayerNorm(proj_size)
-        self.proj_layer = nn.Linear(input_size, proj_size)
+        self.positional_embedding = positional_embedding
+        self.pos_encoder = PositionalEncoding(embedding_dim, dropout)
+        dim_feedforward = int(mlp_ratio * embedding_dim)
+        encoder_layers = TransformerEncoderLayer(d_model = embedding_dim, nhead = num_heads, dim_feedforward = dim_feedforward, 
+                                                 dropout = dropout, activation='gelu', batch_first = False)
+        self.transformer_encoder = TransformerEncoder(encoder_layers, num_layers, nn.LayerNorm(embedding_dim))
+        #self.transformer_encoder = torch.compile(self.transformer_encoder)
+        self.decoder = nn.Linear(embedding_dim, actions_num + 1)
+        self.last_ln = nn.LayerNorm(embedding_dim)
+        self.proj_layer = nn.Linear(input_shape[1], embedding_dim)
+        self.sigma = nn.Parameter(torch.zeros(actions_num, requires_grad=True, dtype=torch.float32), requires_grad=True)
+        
 
     def forward(self, src):
-        #print(src.size())
-        src = encode_image(src)
+        src = src.permute(1,0,2)
         src = self.proj_layer(src)
-        src = self.pos_encoder(src)
+        if not self.positional_embedding == None:
+            src = self.pos_encoder(src)
+        
         output = self.transformer_encoder(src)
         output = torch.mean(output, dim=0)
         #output = self.last_ln(output)
         output = self.decoder(output)
-        return output
+        mu, value = torch.split(output, [self.actions_num,1], dim=1)
+        return mu, mu*0 + self.sigma, value, None
 
 class TransformerBuilder(network_builder.NetworkBuilder):
     def __init__(self, **kwargs):
@@ -290,7 +307,52 @@ class TransformerBuilder(network_builder.NetworkBuilder):
             network_builder.NetworkBuilder.BaseNetwork.__init__(self)
             self.load(params)
 
-            self.transformer = TransformerModel(actions_num, **self.tranformer_params)
+            self.transformer = TransformerModel(actions_num, input_shape, **self.tranformer_params)
+            
+
+        def load(self, params):
+            super().load(params)
+
+            return
+
+        def is_separate_critic(self):
+            return False
+
+        def is_rnn(self):
+            return False
+
+        def get_default_rnn_state(self):
+            return None
+             
+        def load(self, params):
+            self.tranformer_params = params['transformer']        
+
+        def forward(self, obs_dict):
+            obs = obs_dict['obs']
+            return self.transformer(obs)
+
+
+class TorchTransformerBuilder(network_builder.NetworkBuilder):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        return
+
+    def load(self, params):
+        self.params = params
+
+    def build(self, name, **kwargs):
+        net = TorchTransformerBuilder.Network(self.params, **kwargs)
+        return net
+
+    class Network(network_builder.NetworkBuilder.BaseNetwork):
+        def __init__(self, params, **kwargs):
+            actions_num = kwargs.pop('actions_num')
+            input_shape = kwargs.pop('input_shape')
+            self.value_size = kwargs.pop('value_size', 1)
+            network_builder.NetworkBuilder.BaseNetwork.__init__(self)
+            self.load(params)
+
+            self.transformer = TorchTransformerModel(actions_num, input_shape, **self.tranformer_params)
             
 
         def load(self, params):
