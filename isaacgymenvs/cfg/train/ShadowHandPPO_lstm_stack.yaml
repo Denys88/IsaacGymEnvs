@@ -8,23 +8,16 @@ params:
     name: continuous_a2c_logstd
 
   network:
-    name: transformer
+    name: sequential_lstm
     space:
       continuous:
 
-    transformer:
-      #input_split: [77,77,77,77,77,77,77,77]
-      input_split: [42,42,42,42] #not needed
-      seq_pool: True
-      embedding_dim: 256
+    lstm:
+      lstm_dim: 256
       num_layers: 3
-      num_heads: 2
-      mlp_ratio: 2.0
       dropout: 0.0
-      attention_dropout: 0.0
-      stochastic_depth: 0.0
-      positional_embedding: sine
-
+      bidirectional: False
+      mean_reduce: False
   load_checkpoint: ${if:${...checkpoint},True,False} # flag which sets whether to load the checkpoint
   load_path: ${...checkpoint} # path to the checkpoint to load
 
@@ -44,7 +37,7 @@ params:
     gamma: 0.99 #0.998
     tau: 0.95
     learning_rate: 3e-4
-    lr_schedule: linear #adaptive #None
+    lr_schedule: adaptive #None
     kl_threshold: 0.008
     score_to_win: 20000
     max_epochs: ${resolve_default:5000,${....max_iterations}}

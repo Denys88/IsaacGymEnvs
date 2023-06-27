@@ -375,3 +375,88 @@ class TorchTransformerBuilder(network_builder.NetworkBuilder):
         def forward(self, obs_dict):
             obs = obs_dict['obs']
             return self.transformer(obs)
+
+
+class LSTMModel(nn.Module):
+    """Container module with an encoder, a recurrent or transformer module, and a decoder."""
+
+    def __init__(self, 
+        actions_num = 1,
+        input_shape = [4,42],
+        input_split = [],
+        mean_reduce = False,
+        bidirectional = False, 
+        lstm_dim = 512,
+        num_layers = 2,
+        dropout = 0.1):
+        super().__init__()
+
+        self.actions_num = actions_num
+        self.src_mask = None
+        self.mean_reduce = True
+        self.lstm = nn.LSTM(input_size=lstm_dim, hidden_size=lstm_dim, num_layers=num_layers, bidirectional=bidirectional, batch_first=True)
+        self.embedding_dim = lstm_dim * 2 if bidirectional else lstm_dim
+        self.decoder = nn.Linear(self.embedding_dim, actions_num + 1)
+        self.last_ln = nn.LayerNorm(self.embedding_dim)
+        self.proj_layer = nn.Linear(input_shape[1], lstm_dim)
+        self.sigma = nn.Parameter(torch.zeros(actions_num, requires_grad=True, dtype=torch.float32), requires_grad=True)
+        
+
+    def forward(self, src):
+        src = self.proj_layer(src)
+        
+        output, (hidden, cell) = self.lstm(src)
+        #output = torch.mean(output, dim=0)
+        #output = self.last_ln(output)
+        if self.mean_reduce:
+            output = torch.mean(output, dim=1)
+        else:
+            output = output[:, -1, :]
+        output = self.decoder(output)
+        mu, value = torch.split(output, [self.actions_num,1], dim=1)
+        return mu, mu*0 + self.sigma, value, None
+
+
+class SequentialLSTMBuilder(network_builder.NetworkBuilder):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        return
+
+    def load(self, params):
+        self.params = params
+
+    def build(self, name, **kwargs):
+        net = SequentialLSTMBuilder.Network(self.params, **kwargs)
+        return net
+
+    class Network(network_builder.NetworkBuilder.BaseNetwork):
+        def __init__(self, params, **kwargs):
+            actions_num = kwargs.pop('actions_num')
+            input_shape = kwargs.pop('input_shape')
+            self.value_size = kwargs.pop('value_size', 1)
+            network_builder.NetworkBuilder.BaseNetwork.__init__(self)
+            self.load(params)
+
+            self.lstm = LSTMModel(actions_num, input_shape, **self.lstm_params)
+            
+
+        def load(self, params):
+            super().load(params)
+
+            return
+
+        def is_separate_critic(self):
+            return False
+
+        def is_rnn(self):
+            return False
+
+        def get_default_rnn_state(self):
+            return None
+             
+        def load(self, params):
+            self.lstm_params = params['lstm']        
+
+        def forward(self, obs_dict):
+            obs = obs_dict['obs']
+            return self.lstm(obs)
