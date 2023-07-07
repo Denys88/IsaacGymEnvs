@@ -110,6 +110,11 @@ class RLGPUAlgoObserver(AlgoObserver):
         self.ep_infos = []
         self.direct_info = {}
         self.writer = self.algo.writer
+        self.histo_freq = 10
+        self.current_ep = 0
+        self.mu_datapoints = None
+    def after_steps(self):
+        self.mu_datapoints = self.algo.dataset.values_dict['mu'][0:1000]
 
     def process_infos(self, infos, done_indices):
         assert isinstance(infos, dict), "RLGPUAlgoObserver expects dict info"
@@ -126,7 +131,7 @@ class RLGPUAlgoObserver(AlgoObserver):
 
     def after_clear_stats(self):
         self.mean_scores.clear()
-
+        
     def after_print_stats(self, frame, epoch_num, total_time):
         if self.ep_infos:
             for key in self.ep_infos[0]:
@@ -152,7 +157,18 @@ class RLGPUAlgoObserver(AlgoObserver):
             self.writer.add_scalar('scores/mean', mean_scores, frame)
             self.writer.add_scalar('scores/iter', mean_scores, epoch_num)
             self.writer.add_scalar('scores/time', mean_scores, total_time)
+        
+        mean_std = torch.mean(self.algo.model.a2c_network.sigma).exp()
+        max_std = torch.max(self.algo.model.a2c_network.sigma).exp()
+        min_std = torch.min(self.algo.model.a2c_network.sigma).exp()
 
+        self.writer.add_scalar('info/mean_std', mean_std, epoch_num)
+        self.writer.add_scalar('info/max_std', max_std, epoch_num)
+        self.writer.add_scalar('info/min_std', min_std, epoch_num)
+        self.current_ep += 1
+        if self.current_ep % self.histo_freq == 0:
+            for i in range(self.algo.actions_num):
+                self.writer.add_histogram('info/mu[{0}]'.format(i), self.mu_datapoints[:,i], epoch_num, bins='auto')
 
 class RLGPUEnv(vecenv.IVecEnv):
     def __init__(self, config_name, num_actors, **kwargs):
